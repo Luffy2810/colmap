@@ -80,15 +80,18 @@ void WarpImageBetweenCameras(const Camera& source_camera,
       image_point.x() = x + 0.5;
 
       // Camera models assume that the upper left pixel center is (0.5, 0.5).
-      const std::optional<Eigen::Vector2d> cam_point =
+      // For spherical cameras, CamFromImg returns 3D ray direction
+      const std::optional<Eigen::Vector3d> cam_ray =
           scaled_target_camera.CamFromImg(image_point);
-      if (!cam_point) {
+      if (!cam_ray) {
         target_image->SetPixel(x, y, BitmapColor<uint8_t>(0));
         continue;
       }
 
+      // For spherical cameras, the ray direction is already 3D
+      // Pass it directly to ImgFromCam (no homogeneous conversion needed)
       const std::optional<Eigen::Vector2d> source_point =
-          source_camera.ImgFromCam(cam_point->homogeneous());
+          source_camera.ImgFromCam(*cam_ray);
 
       BitmapColor<float> color;
       if (source_point &&
@@ -167,15 +170,18 @@ void WarpImageWithHomographyBetweenCameras(const Eigen::Matrix3d& H,
         continue;
       }
 
-      const std::optional<Eigen::Vector2d> cam_point =
+      // For spherical cameras, CamFromImg returns 3D ray direction
+      const std::optional<Eigen::Vector3d> cam_ray =
           target_camera.CamFromImg(warped_point.hnormalized());
-      if (!cam_point) {
+      if (!cam_ray) {
         target_image->SetPixel(x, y, BitmapColor<uint8_t>(0));
         continue;
       }
 
+      // For spherical cameras, the ray direction is already 3D
+      // Pass it directly to ImgFromCam (no homogeneous conversion needed)
       const std::optional<Eigen::Vector2d> source_point =
-          source_camera.ImgFromCam(cam_point->homogeneous());
+          source_camera.ImgFromCam(*cam_ray);
 
       BitmapColor<float> color;
       if (source_point &&

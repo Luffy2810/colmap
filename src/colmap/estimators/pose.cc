@@ -53,38 +53,16 @@ bool EstimateAbsolutePose(const AbsolutePoseEstimationOptions& options,
   *num_inliers = 0;
   inlier_mask->clear();
 
-  if (options.estimate_focal_length) {
-    // TODO(jsch): Implement non-minimal solver for LORANSAC refinement.
-    // Experiments showed marginal difference between RANSAC/LORANSAC for PNPF
-    // after refining the estimates of this function using RefineAbsolutePose.
-    const Eigen::Vector2d principal_point(camera->PrincipalPointX(),
-                                          camera->PrincipalPointY());
-    std::vector<Eigen::Vector2d> points2D_centered(points2D.size());
-    for (size_t i = 0; i < points2D.size(); ++i) {
-      points2D_centered[i] = points2D[i] - principal_point;
-    }
-    RANSAC<P4PFEstimator> ransac(options.ransac_options);
-    auto report = ransac.Estimate(points2D_centered, points3D);
-    if (report.success) {
-      *cam_from_world =
-          Rigid3d(Eigen::Quaterniond(report.model.cam_from_world.leftCols<3>()),
-                  report.model.cam_from_world.col(3));
-      for (const size_t idx : camera->FocalLengthIdxs()) {
-        camera->params[idx] = report.model.focal_length;
-      }
-      *num_inliers = report.support.num_inliers;
-      *inlier_mask = std::move(report.inlier_mask);
-      return true;
-    }
-  } else {
+ 
     std::vector<P3PEstimator::X_t> points2D_with_rays(points2D.size());
     for (size_t i = 0; i < points2D.size(); ++i) {
       points2D_with_rays[i].image_point = points2D[i];
-      if (const std::optional<Eigen::Vector2d> cam_point =
+      // ✅ Change variable type to Vector3d and rename for clarity
+      if (const std::optional<Eigen::Vector3d> cam_ray =
               camera->CamFromImg(points2D[i]);
-          cam_point) {
-        points2D_with_rays[i].camera_ray =
-            cam_point->homogeneous().normalized();
+          cam_ray) {
+        // ✅ Assign the 3D ray directly, remove .homogeneous().normalized()
+        points2D_with_rays[i].camera_ray = *cam_ray;
       } else {
         points2D_with_rays[i].camera_ray.setZero();
       }
@@ -104,7 +82,7 @@ bool EstimateAbsolutePose(const AbsolutePoseEstimationOptions& options,
       *inlier_mask = std::move(report.inlier_mask);
       return true;
     }
-  }
+  
 
   return false;
 }

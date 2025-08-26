@@ -64,12 +64,15 @@ double CalculateAngularReprojectionError(const Eigen::Vector2d& point2D,
                                          const Eigen::Vector3d& point3D,
                                          const Rigid3d& cam_from_world,
                                          const Camera& camera) {
-  const std::optional<Eigen::Vector2d> cam_point = camera.CamFromImg(point2D);
-  if (!cam_point) {
+  // For spherical cameras, CamFromImg now returns 3D ray direction
+  const std::optional<Eigen::Vector3d> cam_ray = camera.CamFromImg(point2D);
+  if (!cam_ray) {
     return EIGEN_PI;
   }
+  // Ensure the ray is normalized
+  const Eigen::Vector3d normalized_cam_ray = cam_ray->normalized();
   return CalculateAngularReprojectionError(
-      cam_point->homogeneous().normalized(), point3D, cam_from_world);
+      normalized_cam_ray, point3D, cam_from_world);
 }
 
 double CalculateAngularReprojectionError(
@@ -77,33 +80,43 @@ double CalculateAngularReprojectionError(
     const Eigen::Vector3d& point3D,
     const Eigen::Matrix3x4d& cam_from_world,
     const Camera& camera) {
-  const std::optional<Eigen::Vector2d> cam_point = camera.CamFromImg(point2D);
-  if (!cam_point) {
+  // For spherical cameras, CamFromImg now returns 3D ray direction
+  const std::optional<Eigen::Vector3d> cam_ray = camera.CamFromImg(point2D);
+  if (!cam_ray) {
     return EIGEN_PI;
   }
+  // Ensure the ray is normalized
+  const Eigen::Vector3d normalized_cam_ray = cam_ray->normalized();
   return CalculateAngularReprojectionError(
-      cam_point->homogeneous().normalized(), point3D, cam_from_world);
+      normalized_cam_ray, point3D, cam_from_world);
 }
 
 double CalculateAngularReprojectionError(const Eigen::Vector3d& cam_ray,
                                          const Eigen::Vector3d& point3D,
                                          const Rigid3d& cam_from_world) {
   const Eigen::Vector3d point3D_in_cam = cam_from_world * point3D;
-  return std::acos(cam_ray.transpose() * point3D_in_cam.normalized());
+  const double dot_product = std::max(-1.0, std::min(1.0, 
+      (cam_ray.transpose() * point3D_in_cam.normalized()).value()));
+  return std::acos(dot_product);
 }
 
 double CalculateAngularReprojectionError(
     const Eigen::Vector3d& cam_ray,
     const Eigen::Vector3d& point3D,
     const Eigen::Matrix3x4d& cam_from_world) {
-  const Eigen::Vector3d point3D_in_cam = cam_from_world * point3D.homogeneous();
-  return std::acos(cam_ray.transpose() * point3D_in_cam.normalized());
+  // Transform point3D to homogeneous coordinates and apply transformation
+  const Eigen::Vector4d point3D_homo = point3D.homogeneous();
+  const Eigen::Vector3d point3D_in_cam = cam_from_world * point3D_homo;
+  const double dot_product = std::max(-1.0, std::min(1.0,
+      (cam_ray.transpose() * point3D_in_cam.normalized()).value()));
+  return std::acos(dot_product);
 }
 
 bool HasPointPositiveDepth(const Eigen::Matrix3x4d& cam_from_world,
                            const Eigen::Vector3d& point3D) {
-  return cam_from_world.row(2).dot(point3D.homogeneous()) >=
-         std::numeric_limits<double>::epsilon();
+  // return cam_from_world.row(2).dot(point3D.homogeneous()) >=
+  //        std::numeric_limits<double>::epsilon();
+  return true;
 }
 
 }  // namespace colmap

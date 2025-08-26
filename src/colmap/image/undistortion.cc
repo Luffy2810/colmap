@@ -58,7 +58,7 @@ void WriteProjectionMatrix(const std::string& path,
                            const Camera& camera,
                            const Image& image,
                            const std::string& header) {
-  THROW_CHECK(camera.model_id == PinholeCameraModel::model_id);
+  THROW_CHECK(camera.model_id == SphericalCameraModel::model_id);
 
   std::ofstream file(path, std::ios::trunc);
   THROW_CHECK_FILE_OPEN(file, path);
@@ -769,10 +769,10 @@ Camera UndistortCamera(const UndistortCameraOptions& options,
   THROW_CHECK_LT(options.roi_min_y, options.roi_max_y);
 
   Camera undistorted_camera;
-  undistorted_camera.model_id = PinholeCameraModel::model_id;
+  undistorted_camera.model_id = SphericalCameraModel::model_id;
   undistorted_camera.width = camera.width;
   undistorted_camera.height = camera.height;
-  undistorted_camera.params.resize(PinholeCameraModel::num_params, 0);
+  undistorted_camera.params.resize(SphericalCameraModel::num_params, 0);
 
   // Copy focal length parameters.
   const span<const size_t> focal_length_idxs = camera.FocalLengthIdxs();
@@ -820,8 +820,8 @@ Camera UndistortCamera(const UndistortCameraOptions& options,
   }
 
   // Scale in order to match the boundary of the undistorted image.
-  if (roi_enabled || (camera.model_id != SimplePinholeCameraModel::model_id &&
-                      camera.model_id != PinholeCameraModel::model_id)) {
+  if (roi_enabled || (camera.model_id != SphericalCameraModel::model_id &&
+                      camera.model_id != SphericalCameraModel::model_id)) {
     // Determine min/max coordinates along top / bottom image border.
 
     double left_min_x = std::numeric_limits<double>::max();
@@ -831,22 +831,22 @@ Camera UndistortCamera(const UndistortCameraOptions& options,
 
     for (size_t y = roi_min_y; y < roi_max_y; ++y) {
       // Left border.
-      if (const std::optional<Eigen::Vector2d> cam_point1 =
+      if (const std::optional<Eigen::Vector3d> cam_point1 =
               camera.CamFromImg(Eigen::Vector2d(0.5, y + 0.5));
           cam_point1.has_value()) {
         if (const std::optional<Eigen::Vector2d> undistorted_point1 =
-                undistorted_camera.ImgFromCam(cam_point1->homogeneous());
+                undistorted_camera.ImgFromCam(*cam_point1);
             undistorted_point1) {
           left_min_x = std::min(left_min_x, undistorted_point1->x());
           left_max_x = std::max(left_max_x, undistorted_point1->x());
         }
       }
       // Right border.
-      if (const std::optional<Eigen::Vector2d> cam_point2 =
+      if (const std::optional<Eigen::Vector3d> cam_point2 =
               camera.CamFromImg(Eigen::Vector2d(camera.width - 0.5, y + 0.5));
           cam_point2.has_value()) {
         if (const std::optional<Eigen::Vector2d> undistorted_point2 =
-                undistorted_camera.ImgFromCam(cam_point2->homogeneous());
+                undistorted_camera.ImgFromCam(*cam_point2);
             undistorted_point2) {
           right_min_x = std::min(right_min_x, undistorted_point2->x());
           right_max_x = std::max(right_max_x, undistorted_point2->x());
@@ -863,22 +863,22 @@ Camera UndistortCamera(const UndistortCameraOptions& options,
 
     for (size_t x = roi_min_x; x < roi_max_x; ++x) {
       // Top border.
-      if (const std::optional<Eigen::Vector2d> cam_point1 =
+      if (const std::optional<Eigen::Vector3d> cam_point1 =
               camera.CamFromImg(Eigen::Vector2d(x + 0.5, 0.5));
           cam_point1) {
         if (const std::optional<Eigen::Vector2d> undistorted_point1 =
-                undistorted_camera.ImgFromCam(cam_point1->homogeneous());
+                undistorted_camera.ImgFromCam(*cam_point1);
             undistorted_point1) {
           top_min_y = std::min(top_min_y, undistorted_point1->y());
           top_max_y = std::max(top_max_y, undistorted_point1->y());
         }
       }
       // Bottom border.
-      if (const std::optional<Eigen::Vector2d> cam_point2 =
+      if (const std::optional<Eigen::Vector3d> cam_point2 =
               camera.CamFromImg(Eigen::Vector2d(x + 0.5, camera.height - 0.5));
           cam_point2) {
         if (const std::optional<Eigen::Vector2d> undistorted_point2 =
-                undistorted_camera.ImgFromCam(cam_point2->homogeneous());
+                undistorted_camera.ImgFromCam(*cam_point2);
             undistorted_point2) {
           bottom_min_y = std::min(bottom_min_y, undistorted_point2->y());
           bottom_max_y = std::max(bottom_max_y, undistorted_point2->y());
@@ -986,14 +986,14 @@ void UndistortReconstruction(const UndistortCameraOptions& options,
     for (point2D_t point2D_idx = 0; point2D_idx < image.NumPoints2D();
          ++point2D_idx) {
       auto& point2D = image.Point2D(point2D_idx);
-      const std::optional<Eigen::Vector2d> cam_point =
+      const std::optional<Eigen::Vector3d> cam_point =
           distorted_camera.CamFromImg(point2D.xy);
       if (!cam_point) {
         point2D.xy =
             Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
       } else {
         const std::optional<Eigen::Vector2d> undistorted_point =
-            undistorted_camera.ImgFromCam(cam_point->homogeneous());
+            undistorted_camera.ImgFromCam(*cam_point);
         if (undistorted_point) {
           point2D.xy = *undistorted_point;
         } else {
@@ -1011,10 +1011,10 @@ void RectifyStereoCameras(const Camera& camera1,
                           Eigen::Matrix3d* H1,
                           Eigen::Matrix3d* H2,
                           Eigen::Matrix4d* Q) {
-  THROW_CHECK(camera1.model_id == SimplePinholeCameraModel::model_id ||
-              camera1.model_id == PinholeCameraModel::model_id);
-  THROW_CHECK(camera2.model_id == SimplePinholeCameraModel::model_id ||
-              camera2.model_id == PinholeCameraModel::model_id);
+  THROW_CHECK(camera1.model_id == SphericalCameraModel::model_id ||
+              camera1.model_id == SphericalCameraModel::model_id);
+  THROW_CHECK(camera2.model_id == SphericalCameraModel::model_id ||
+              camera2.model_id == SphericalCameraModel::model_id);
 
   // Compute the average rotation between the first and the second camera.
   Eigen::AngleAxisd half_cam2_from_cam1(cam2_from_cam1.rotation);

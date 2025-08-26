@@ -144,13 +144,16 @@ bool EstimateGeneralizedAbsolutePose(
     return false;
   }
 
+
   std::vector<GP3PEstimator::X_t> rig_points2D(points2D.size());
   for (size_t i = 0; i < points2D.size(); i++) {
     const size_t camera_idx = camera_idxs[i];
-    if (const std::optional<Eigen::Vector2d> cam_point =
+    // ✅ Change variable type to Vector3d and rename
+    if (const std::optional<Eigen::Vector3d> cam_ray =
             cameras[camera_idx].CamFromImg(points2D[i]);
-        cam_point) {
-      rig_points2D[i].ray_in_cam = cam_point->homogeneous().normalized();
+        cam_ray) {
+      // ✅ Assign the 3D ray directly
+      rig_points2D[i].ray_in_cam = *cam_ray;
     } else {
       rig_points2D[i].ray_in_cam.setZero();
     }
@@ -221,23 +224,27 @@ bool EstimateGeneralizedRelativePose(
     Rigid3d cam2_from_cam1;
     std::vector<Eigen::Vector3d> cam_rays1(num_points);
     std::vector<Eigen::Vector3d> cam_rays2(num_points);
+// AFTER (Corrected panoramic case)
+
     for (size_t i = 0; i < num_points; ++i) {
       const size_t camera_idx1 = camera_idxs1[i];
-      if (const std::optional<Eigen::Vector2d> cam_point1 =
+      // ✅ Change variable type
+      if (const std::optional<Eigen::Vector3d> cam_ray1 =
               cameras[camera_idx1].CamFromImg(points2D1[i]);
-          cam_point1.has_value()) {
-        cam_rays1[i] = cams_from_rig[camera_idx1].rotation.inverse() *
-                       cam_point1->homogeneous().normalized();
+          cam_ray1.has_value()) {
+        // ✅ Assign the 3D ray directly
+        cam_rays1[i] = cams_from_rig[camera_idx1].rotation.inverse() * *cam_ray1;
       } else {
         cam_rays1[i].setZero();
       }
 
       const size_t camera_idx2 = camera_idxs2[i];
-      if (const std::optional<Eigen::Vector2d> cam_point2 =
+      // ✅ Change variable type
+      if (const std::optional<Eigen::Vector3d> cam_ray2 =
               cameras[camera_idxs2[i]].CamFromImg(points2D2[i]);
-          cam_point2.has_value()) {
-        cam_rays2[i] = cams_from_rig[camera_idx2].rotation.inverse() *
-                       cam_point2->homogeneous().normalized();
+          cam_ray2.has_value()) {
+        // ✅ Assign the 3D ray directly
+        cam_rays2[i] = cams_from_rig[camera_idx2].rotation.inverse() * *cam_ray2;
       } else {
         cam_rays2[i].setZero();
       }
@@ -258,19 +265,23 @@ bool EstimateGeneralizedRelativePose(
   std::vector<GRNPObservation> points2(num_points);
   for (size_t i = 0; i < num_points; ++i) {
     points1[i].cam_from_rig = cams_from_rig[camera_idxs1[i]];
-    if (const std::optional<Eigen::Vector2d> cam_point1 =
+    // ✅ Change variable type
+    if (const std::optional<Eigen::Vector3d> cam_ray1 =
             cameras[camera_idxs1[i]].CamFromImg(points2D1[i]);
-        cam_point1.has_value()) {
-      points1[i].ray_in_cam = cam_point1->homogeneous().normalized();
+        cam_ray1.has_value()) {
+      // ✅ Assign the 3D ray directly
+      points1[i].ray_in_cam = *cam_ray1;
     } else {
       points1[i].ray_in_cam.setZero();
     }
 
     points2[i].cam_from_rig = cams_from_rig[camera_idxs2[i]];
-    if (const std::optional<Eigen::Vector2d> cam_point2 =
+    // ✅ Change variable type
+    if (const std::optional<Eigen::Vector3d> cam_ray2 =
             cameras[camera_idxs2[i]].CamFromImg(points2D2[i]);
-        cam_point2.has_value()) {
-      points2[i].ray_in_cam = cam_point2->homogeneous().normalized();
+        cam_ray2.has_value()) {
+      // ✅ Assign the 3D ray directly
+      points2[i].ray_in_cam = *cam_ray2;
     } else {
       points2[i].ray_in_cam.setZero();
     }
