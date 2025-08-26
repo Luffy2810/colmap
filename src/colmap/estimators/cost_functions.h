@@ -72,16 +72,74 @@ class AutoDiffCostFunctor {
   }
 };
 
-// Standard bundle adjustment cost function for variable
-// camera pose, calibration, and point parameters.
+
+template <typename T>
+inline T WrapToPi(const T& a) {
+  const T kTwoPi = T(2.0 * M_PI);
+  const T kPi    = T(M_PI);
+  T x = a - ceres::floor((a + kPi) / kTwoPi) * kTwoPi;
+  if (x > kPi) x -= kTwoPi;
+  return x;
+}
+template <typename T>
+inline void MakeTangentBasisAt(const Eigen::Matrix<T,3,1>& ohat,
+                               Eigen::Matrix<T,3,1>* e1,
+                               Eigen::Matrix<T,3,1>* e2) {
+  // Use fixed north pole as reference for consistency
+  Eigen::Matrix<T,3,1> north;
+  north << T(0), T(0), T(1);
+  
+  if (ceres::abs(ohat.z()) > T(0.999)) {
+    // Near poles, use x-axis as reference
+    Eigen::Matrix<T,3,1> xaxis;
+    xaxis << T(1), T(0), T(0);
+    *e1 = xaxis - ohat.dot(xaxis) * ohat;
+  } else {
+    *e1 = north - ohat.dot(north) * ohat;
+  }
+  
+  T n1 = e1->norm();
+  if (n1 > T(1e-6)) {
+    *e1 /= n1;
+    *e2 = ohat.cross(*e1);
+  } else {
+    // Fallback for degenerate cases
+    *e1 << T(1), T(0), T(0);
+    *e2 << T(0), T(1), T(0);
+  }
+}
+
+// ERP inverse: observed pixel -> unit bearing using (cx, cy) layout you defined.
+// camera_params = [f_dummy, cx, cy]
+template <typename T>
+inline Eigen::Matrix<T,3,1> ERP_PixelToUnitRay(const T* camera_params, T x, T y) {
+  const T cx = camera_params[1];
+  const T cy = camera_params[2];
+  const T pi = T(M_PI);
+
+  // x ∈ [0, 2*cx], y ∈ [0, 2*cy]
+  const T phi   = pi * (x / cx - T(1));       // longitude ∈ [-π, π]
+  const T theta = pi * (y / (T(2) * cy));     // colatitude ∈ [0, π]
+
+  const T s = ceres::sin(theta);
+  Eigen::Matrix<T,3,1> ray;
+  ray << s * ceres::cos(phi),
+         s * ceres::sin(phi),
+         ceres::cos(theta);
+  return ray; // unit
+}
+
+// ---------- Specialization: SphericalCameraModel ----------
+
 template <typename CameraModel>
 class ReprojErrorCostFunctor
-    : public AutoDiffCostFunctor<ReprojErrorCostFunctor<CameraModel>,
-                                 2,
-                                 4,
-                                 3,
-                                 3,
-                                 CameraModel::num_params> {
+    : public AutoDiffCostFunctor<
+          ReprojErrorCostFunctor<CameraModel>,
+          2,                                  // residuals: 2D pixel diff
+          4,                                  // cam_from_world rotation (quat)
+          3,                                  // cam_from_world translation
+          3,                                  // point3D (world)
+          CameraModel::num_params> {          // intrinsics
  public:
   explicit ReprojErrorCostFunctor(const Eigen::Vector2d& point2D)
       : observed_x_(point2D(0)), observed_y_(point2D(1)) {}
@@ -92,22 +150,99 @@ class ReprojErrorCostFunctor
                   const T* const point3D,
                   const T* const camera_params,
                   T* residuals) const {
-    const Eigen::Matrix<T, 3, 1> point3D_in_cam =
+    const Eigen::Matrix<T, 3, 1> Xc =
         EigenQuaternionMap<T>(cam_from_world_rotation) *
             EigenVector3Map<T>(point3D) +
         EigenVector3Map<T>(cam_from_world_translation);
+
     if (CameraModel::ImgFromCam(camera_params,
-                                point3D_in_cam[0],
-                                point3D_in_cam[1],
-                                point3D_in_cam[2],
-                                &residuals[0],
-                                &residuals[1])) {
+                                Xc[0], Xc[1], Xc[2],
+                                &residuals[0], &residuals[1])) {
       residuals[0] -= T(observed_x_);
       residuals[1] -= T(observed_y_);
     } else {
       residuals[0] = T(0);
       residuals[1] = T(0);
     }
+    return true;
+  }
+
+ private:
+  const double observed_x_;
+  const double observed_y_;
+};
+
+
+template <>
+class ReprojErrorCostFunctor<SphericalCameraModel>
+    : public AutoDiffCostFunctor<
+          ReprojErrorCostFunctor<SphericalCameraModel>,
+          2,                                  // residuals: 2 (tangent plane)
+          4,                                  // cam_from_world rotation (quat)
+          3,                                  // cam_from_world translation
+          3,                                  // point3D
+          SphericalCameraModel::num_params> { // camera params [f_dummy,cx,cy]
+ public:
+  explicit ReprojErrorCostFunctor(const Eigen::Vector2d& point2D)
+      : observed_x_(point2D(0)), observed_y_(point2D(1)) {}
+
+  template <typename T>
+  bool operator()(const T* const cam_from_world_rotation,
+                  const T* const cam_from_world_translation,
+                  const T* const point3D,
+                  const T* const camera_params,
+                  T* residuals) const {
+    using Vec3 = Eigen::Matrix<T,3,1>;
+
+    // Predicted bearing d̂: transform 3D point into camera, normalize
+    const Vec3 Xw = EigenVector3Map<T>(point3D);
+    const Vec3 t  = EigenVector3Map<T>(cam_from_world_translation);
+    const Vec3 Xc = EigenQuaternionMap<T>(cam_from_world_rotation) * Xw + t;
+
+    const T n = Xc.norm();
+    if (n < T(1e-12)) {
+      residuals[0] = T(0);
+      residuals[1] = T(0);
+      return true;
+    }
+    const Vec3 dhat = Xc / n;
+
+    // Observed bearing ô from observed pixel via ERP inverse
+    const T x_obs = T(observed_x_);
+    const T y_obs = T(observed_y_);
+    const Vec3 ohat = ERP_PixelToUnitRay<T>(camera_params, x_obs, y_obs);
+
+    // Geodesic log map on S^2 at ô:
+    // tang = (alpha / sin alpha) * (d̂ - (ôᵀ d̂) ô), with alpha = angle(ô,d̂)
+    const T dot  = ohat.dot(dhat);
+    const T dcl = (dot > T(1)) ? T(1) : (dot < T(-1) ? T(-1) : dot); // clamp
+    const T s    = (ohat.cross(dhat)).norm();                // = sin(alpha)
+    const T alpha = ceres::atan2(s, dcl);
+
+    Vec3 tang = dhat - dcl * ohat;               // in tangent space at ô
+    const T scale = (s > T(1e-12)) ? (alpha / s) : T(1);
+    tang *= scale;                                // ||tang|| = alpha (radians)
+
+    Vec3 e1, e2;
+    MakeTangentBasisAt<T>(ohat, &e1, &e2);
+    T r0 = e1.dot(tang); // radians
+    T r1 = e2.dot(tang); // radians
+
+    
+    // Convert radians → pixels for ERP:
+    // x = cx * (phi/pi + 1)      => dpx/dphi = cx/pi
+    // y = (2*cy) * (theta/pi)    => dpy/dtheta = (2*cy)/pi
+    const T cx = camera_params[1];
+    const T cy = camera_params[2];
+    const T px_per_rad_x = cx / T(M_PI);
+    const T px_per_rad_y = (T(2) * cy) / T(M_PI);
+    const T max_error_rad = T(0.1);  // ~5.7 degrees max error
+    r0 = ceres::fmin(ceres::fmax(r0, -max_error_rad), max_error_rad);
+    r1 = ceres::fmin(ceres::fmax(r1, -max_error_rad), max_error_rad);
+
+    // Then scale to pixels
+    residuals[0] = r0 * px_per_rad_x;
+    residuals[1] = r1 * px_per_rad_y;
     return true;
   }
 
