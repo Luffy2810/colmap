@@ -1899,61 +1899,71 @@ std::vector<double> SphericalCameraModel::InitializeParams(
 template <typename T>
 bool SphericalCameraModel::ImgFromCam(
     const T* params, T u, T v, T w, T* x, T* y) {
-  const T kEpsilon = T(1e-9);
-  const T norm_uvw = ceres::sqrt(u * u + v * v + w * w);
-  if (norm_uvw < kEpsilon) {
-    return false;
-  }
   
-  // Normalize the ray
-  const T inv_norm = T(1) / norm_uvw;
-  const T u_norm = u * inv_norm;
-  const T v_norm = v * inv_norm;
-  const T w_norm = w * inv_norm;
-
-  // Convert Cartesian direction vector to spherical coordinates (longitude and latitude)
-  // phi (longitude) is the angle in the X-Y plane from the X-axis. Range [-PI, PI].
-  // theta (latitude/colatitude) is the angle from the Z-axis. Range [0, PI].
-  const T phi = ceres::atan2(v_norm, u_norm);
-  const T theta = acos(w_norm);
-
   const T cx = params[1];
   const T cy = params[2];
   
-  // Standard equirectangular projection:
-  // Map longitude phi [-PI, PI] to x [0, 2*cx] (i.e., image width)
-  // Map latitude theta [0, PI] to y [0, 2*cy] (i.e., image height)
+  // Match MVS coordinate system exactly
+  // MVS treats camera.width = 2*cx, camera.height = 2*cy
+  
+  // Calculate depth (radial distance) 
+  const T depth = ceres::sqrt(u * u + v * v + w * w);
+  if (depth < T(1e-6)) {
+    *x = cx;
+    *y = cy;
+    return true;
+  }
+  
+  // MVS ProjectonCamera convention for SPHERE:
+  // latitude = -asin(tmp.y / depth)
+  // longitude = atan2(tmp.x, tmp.z)
+  const T latitude = -ceres::asin(v / depth);
+  const T longitude = ceres::atan2(u, w);
+  
   const T pi = T(M_PI);
-  *x = cx * (phi / pi + T(1.0));
-  *y = (T(2) * cy) * (theta / pi);
+  
+  // MVS projection formulas:
+  // point.x = (longitude / (2*pi)) * width + cx
+  // point.y = (-latitude / pi) * height + cy
+  // where width = 2*cx, height = 2*cy
+  *x = (longitude / (T(2) * pi)) * (T(2) * cx) + cx;
+  *y = (-latitude / pi) * (T(2) * cy) + cy;
   
   return true;
 }
 
-// Lift a 2D pixel to a 3D ray in the camera frame.
 bool SphericalCameraModel::CamFromImg(
     const double* params, double x, double y, double* u, double* v, double* w) {
+  
   const double cx = params[1];
   const double cy = params[2];
-
-  const double pi = M_PI;
-
-  // Inverse equirectangular projection:
-  // Map x [0, 2*cx] back to longitude phi [-PI, PI]
-  // Map y [0, 2*cy] back to latitude theta [0, PI]
-  const double phi = pi * (x / cx - 1.0);
-  const double theta = pi * y / (2.0 * cy);
   
-  // Convert spherical coordinates back to a 3D Cartesian unit vector
-  const double sin_theta = std::sin(theta);
-  *u = sin_theta * std::cos(phi);
-  *v = sin_theta * std::sin(phi);
-  *w = std::cos(theta);
-
+  // MVS convention: width = 2*cx, height = 2*cy
+  const double width = 2.0 * cx;
+  const double height = 2.0 * cy;
+  
+  // MVS Get3DPointonRefCam formulas for SPHERE:
+  // lon = (x - cx) / width * 2*pi
+  // lat = -(y - cy) / height * pi
+  const double pi = M_PI;
+  const double lon = ((x - cx) / width) * 2.0 * pi;
+  const double lat = -((y - cy) / height) * pi;
+  
+  // MVS to 3D conversion:
+  // point_cam.x = cos(lat) * sin(lon)
+  // point_cam.y = -sin(lat)  
+  // point_cam.z = cos(lat) * cos(lon)
+  const double cos_lat = std::cos(lat);
+  const double sin_lat = std::sin(lat);
+  const double cos_lon = std::cos(lon);
+  const double sin_lon = std::sin(lon);
+  
+  *u = cos_lat * sin_lon;  // x in camera frame
+  *v = -sin_lat;           // y in camera frame  
+  *w = cos_lat * cos_lon;  // z in camera frame
+  
   return true;
 }
-
-
 std::optional<Eigen::Vector3d> CameraModelCamFromImg(
     const CameraModelId model_id,
     const std::vector<double>& params,

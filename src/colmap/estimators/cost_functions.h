@@ -117,16 +117,19 @@ inline Eigen::Matrix<T,3,1> ERP_PixelToUnitRay(const T* camera_params, T x, T y)
   const T cy = camera_params[2];
   const T pi = T(M_PI);
 
-  // x ∈ [0, 2*cx], y ∈ [0, 2*cy]
-  const T phi   = pi * (x / cx - T(1));       // longitude ∈ [-π, π]
-  const T theta = pi * (y / (T(2) * cy));     // colatitude ∈ [0, π]
+  // Match MVS Get3DPointonRefCam convention exactly
+  // width = 2*cx, height = 2*cy in MVS
+  const T lon = ((x - cx) / (T(2) * cx)) * (T(2) * pi);
+  const T lat = -((y - cy) / (T(2) * cy)) * pi;
 
-  const T s = ceres::sin(theta);
+  const T cos_lat = ceres::cos(lat);
+  const T sin_lat = ceres::sin(lat);
+  
   Eigen::Matrix<T,3,1> ray;
-  ray << s * ceres::cos(phi),
-         s * ceres::sin(phi),
-         ceres::cos(theta);
-  return ray; // unit
+  ray << cos_lat * ceres::sin(lon),   // MVS x component
+         -sin_lat,                     // MVS y component (negative)
+         cos_lat * ceres::cos(lon);    // MVS z component
+  return ray;
 }
 
 // ---------- Specialization: SphericalCameraModel ----------
