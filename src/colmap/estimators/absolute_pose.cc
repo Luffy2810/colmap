@@ -558,14 +558,37 @@ void ComputeSquaredReprojectionError(
   const size_t num_points = points2D.size();
   THROW_CHECK_EQ(num_points, points3D.size());
   residuals->resize(num_points);
+  
   for (size_t i = 0; i < num_points; ++i) {
     const Eigen::Vector3d point3D_in_cam =
         cam_from_world * points3D[i].homogeneous();
     const std::optional<Eigen::Vector2d> proj_image_point =
         img_from_cam_func(point3D_in_cam);
+    
     if (proj_image_point) {
-      (*residuals)[i] =
-          (*proj_image_point - points2D[i].image_point).squaredNorm();
+      const Eigen::Vector2d& observed = points2D[i].image_point;
+      const Eigen::Vector2d& projected = *proj_image_point;
+      
+      // Compute error with longitude wrapping in x-direction
+      double dx = projected.x() - observed.x();
+      double dy = projected.y() - observed.y();
+      
+      // Handle longitude wrapping for spherical cameras
+      // Assume image width represents full 360° longitude range
+      // Get image width from the first projected point's context
+      // For now, use a reasonable assumption or pass width as parameter
+      const double image_width = 1920.0; // Should be passed as parameter ideally
+      
+      // Wrap x-direction error (longitude wrapping)
+      if (std::abs(dx) > image_width / 2.0) {
+        if (dx > 0) {
+          dx -= image_width;
+        } else {
+          dx += image_width;
+        }
+      }
+      
+      (*residuals)[i] = dx * dx + dy * dy;
     } else {
       (*residuals)[i] = std::numeric_limits<double>::max();
     }

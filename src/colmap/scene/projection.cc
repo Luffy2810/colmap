@@ -37,13 +37,21 @@ double CalculateSquaredReprojectionError(const Eigen::Vector2d& point2D,
                                          const Eigen::Vector3d& point3D,
                                          const Rigid3d& cam_from_world,
                                          const Camera& camera) {
-  const Eigen::Vector3d point3D_in_cam = cam_from_world * point3D;
-  const std::optional<Eigen::Vector2d> proj_point2D =
-      camera.ImgFromCam(point3D_in_cam);
-  if (!proj_point2D) {
+  // For spherical cameras, use angular error converted to pixel scale
+  const double angular_error = CalculateAngularReprojectionError(
+      point2D, point3D, cam_from_world, camera);
+  if (angular_error == EIGEN_PI) {
     return std::numeric_limits<double>::max();
   }
-  return (*proj_point2D - point2D).squaredNorm();
+  
+  // Convert angular error to pixel scale
+  // Use image resolution to scale angular error to pixel units
+  const double width = camera.width;
+  const double height = camera.height;
+  const double scale_factor = std::max(width, height) / EIGEN_PI;
+  const double pixel_error = angular_error * scale_factor;
+  
+  return pixel_error * pixel_error;
 }
 
 double CalculateSquaredReprojectionError(
@@ -51,13 +59,21 @@ double CalculateSquaredReprojectionError(
     const Eigen::Vector3d& point3D,
     const Eigen::Matrix3x4d& cam_from_world,
     const Camera& camera) {
-  const Eigen::Vector3d point3D_in_cam = cam_from_world * point3D.homogeneous();
-  const std::optional<Eigen::Vector2d> proj_point2D =
-      camera.ImgFromCam(point3D_in_cam);
-  if (!proj_point2D) {
+  // For spherical cameras, use angular error converted to pixel scale
+  const double angular_error = CalculateAngularReprojectionError(
+      point2D, point3D, cam_from_world, camera);
+  if (angular_error == EIGEN_PI) {
     return std::numeric_limits<double>::max();
   }
-  return (*proj_point2D - point2D).squaredNorm();
+  
+  // Convert angular error to pixel scale
+  // Use image resolution to scale angular error to pixel units
+  const double width = camera.width;
+  const double height = camera.height;
+  const double scale_factor = std::max(width, height) / EIGEN_PI;
+  const double pixel_error = angular_error * scale_factor;
+  
+  return pixel_error * pixel_error;
 }
 
 double CalculateAngularReprojectionError(const Eigen::Vector2d& point2D,
@@ -111,12 +127,15 @@ double CalculateAngularReprojectionError(
       (cam_ray.transpose() * point3D_in_cam.normalized()).value()));
   return std::acos(dot_product);
 }
-
 bool HasPointPositiveDepth(const Eigen::Matrix3x4d& cam_from_world,
                            const Eigen::Vector3d& point3D) {
-  // return cam_from_world.row(2).dot(point3D.homogeneous()) >=
-  //        std::numeric_limits<double>::epsilon();
-  return true;
+  // For spherical cameras, all points are "visible" since it's omnidirectional
+  // But we still want to check if the point is at a reasonable distance
+  const Eigen::Vector3d point3D_in_cam = 
+      cam_from_world * point3D.homogeneous();
+  
+  // Check if point is not at the camera center (which would be undefined)
+  return point3D_in_cam.norm() > std::numeric_limits<double>::epsilon();
 }
 
 }  // namespace colmap

@@ -250,17 +250,18 @@ const BundleAdjustmentConfig& BundleAdjuster::Config() const { return config_; }
 
 ceres::LossFunction* BundleAdjustmentOptions::CreateLossFunction() const {
   ceres::LossFunction* loss_function = nullptr;
-  switch (loss_function_type) {
-    case LossFunctionType::TRIVIAL:
-      loss_function = new ceres::TrivialLoss();
-      break;
-    case LossFunctionType::SOFT_L1:
-      loss_function = new ceres::SoftLOneLoss(loss_function_scale);
-      break;
-    case LossFunctionType::CAUCHY:
-      loss_function = new ceres::CauchyLoss(loss_function_scale);
-      break;
-  }
+  loss_function = new ceres::HuberLoss(loss_function_scale); 
+  // switch (loss_function_type) {
+  //   case LossFunctionType::TRIVIAL:
+  //     loss_function = new ceres::TrivialLoss();
+  //     break;
+  //   case LossFunctionType::SOFT_L1:
+  //     loss_function = new ceres::SoftLOneLoss(loss_function_scale);
+  //     break;
+  //   case LossFunctionType::CAUCHY:
+  //     loss_function = new ceres::CauchyLoss(loss_function_scale);
+  //     break;
+  // }
   THROW_CHECK_NOTNULL(loss_function);
   return loss_function;
 }

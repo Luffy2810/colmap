@@ -235,17 +235,22 @@ class ReprojErrorCostFunctor<SphericalCameraModel>
     // Convert radians → pixels for ERP:
     // x = cx * (phi/pi + 1)      => dpx/dphi = cx/pi
     // y = (2*cy) * (theta/pi)    => dpy/dtheta = (2*cy)/pi
-    const T cx = camera_params[1];
-    const T cy = camera_params[2];
-    const T px_per_rad_x = cx / T(M_PI);
-    const T px_per_rad_y = (T(2) * cy) / T(M_PI);
-    const T max_error_rad = T(0.1);  // ~5.7 degrees max error
-    r0 = ceres::fmin(ceres::fmax(r0, -max_error_rad), max_error_rad);
-    r1 = ceres::fmin(ceres::fmax(r1, -max_error_rad), max_error_rad);
+    // const T cx = camera_params[1];
+    // const T cy = camera_params[2];
+    // const T px_per_rad_x = cx / T(M_PI);
+    // const T px_per_rad_y = (T(2) * cy) / T(M_PI);
+    // const T max_error_rad = T(0.1);  // ~5.7 degrees max error
+    // r0 = ceres::fmin(ceres::fmax(r0, -max_error_rad), max_error_rad);
+    // r1 = ceres::fmin(ceres::fmax(r1, -max_error_rad), max_error_rad);
 
-    // Then scale to pixels
-    residuals[0] = r0 * px_per_rad_x;
-    residuals[1] = r1 * px_per_rad_y;
+    // // Then scale to pixels
+    // residuals[0] = r0 * px_per_rad_x;
+    // residuals[1] = r1 * px_per_rad_y;
+
+    const T kScale = T(180.0 / M_PI);  // Degrees
+    residuals[0] = kScale * r0;
+    residuals[1] = kScale * r1;
+
     return true;
   }
 

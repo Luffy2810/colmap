@@ -16,29 +16,42 @@ bool TriangulatePoint(const Eigen::Matrix3x4d& cam1_from_world,
                       const Eigen::Vector3d& cam_ray1,
                       const Eigen::Vector3d& cam_ray2,
                       Eigen::Vector3d* xyz) {
-  THROW_CHECK_NOTNULL(xyz);
-
-  Eigen::Matrix4d A;
-
-  A.row(0) = cam_ray1.y() * cam1_from_world.row(0) - cam_ray1.x() * cam1_from_world.row(1);
-  A.row(1) = cam_ray1.z() * cam1_from_world.row(0) - cam_ray1.x() * cam1_from_world.row(2);
-  A.row(2) = cam_ray2.y() * cam2_from_world.row(0) - cam_ray2.x() * cam2_from_world.row(1);
-  A.row(3) = cam_ray2.z() * cam2_from_world.row(0) - cam_ray2.x() * cam2_from_world.row(2);
-
-  const Eigen::JacobiSVD<Eigen::Matrix4d> svd(A, Eigen::ComputeFullV);
-#if EIGEN_VERSION_AT_LEAST(3, 4, 0)
-  if (svd.info() != Eigen::Success) {
-    return false;
+  // For spherical cameras, use midpoint triangulation
+  // that handles arbitrary ray directions
+  
+  // Get camera centers
+  Eigen::Vector3d C1 = -cam1_from_world.leftCols<3>().transpose() * 
+                        cam1_from_world.rightCols<1>();
+  Eigen::Vector3d C2 = -cam2_from_world.leftCols<3>().transpose() * 
+                        cam2_from_world.rightCols<1>();
+  
+  // Transform rays to world coordinates
+  Eigen::Vector3d ray1_world = cam1_from_world.leftCols<3>().transpose() * cam_ray1;
+  Eigen::Vector3d ray2_world = cam2_from_world.leftCols<3>().transpose() * cam_ray2;
+  
+  // Find closest point between two rays
+  Eigen::Vector3d w0 = C1 - C2;
+  double a = ray1_world.dot(ray1_world);
+  double b = ray1_world.dot(ray2_world);
+  double c = ray2_world.dot(ray2_world);
+  double d = ray1_world.dot(w0);
+  double e = ray2_world.dot(w0);
+  
+  double denom = a * c - b * b;
+  if (std::abs(denom) < 1e-6) {
+    return false;  // Rays are parallel
   }
-#endif
-
-  const Eigen::Vector4d world_point_homogeneous = svd.matrixV().col(3);
-
-  if (world_point_homogeneous(3) == 0) {
-    return false;
-  }
-
-  *xyz = world_point_homogeneous.hnormalized();
+  
+  double s = (b * e - c * d) / denom;
+  double t = (a * e - b * d) / denom;
+  
+  // Get the two closest points
+  Eigen::Vector3d p1 = C1 + s * ray1_world;
+  Eigen::Vector3d p2 = C2 + t * ray2_world;
+  
+  // Return midpoint
+  *xyz = 0.5 * (p1 + p2);
+  
   return true;
 }
 

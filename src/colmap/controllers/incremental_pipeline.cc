@@ -125,7 +125,7 @@ BundleAdjustmentOptions IncrementalPipelineOptions::LocalBundleAdjustment()
   options.refine_sensor_from_rig = ba_refine_sensor_from_rig;
   options.min_num_residuals_for_cpu_multi_threading =
       ba_min_num_residuals_for_cpu_multi_threading;
-  options.loss_function_scale = 1.0;
+  options.loss_function_scale = 0.1;
   options.loss_function_type =
       BundleAdjustmentOptions::LossFunctionType::SOFT_L1;
   options.use_gpu = ba_use_gpu;
